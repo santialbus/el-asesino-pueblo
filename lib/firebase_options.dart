@@ -1,27 +1,45 @@
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart' show kIsWeb;
 
-/// Configuración de Firebase (proyecto `el-asesino-f0e55`).
 class DefaultFirebaseOptions {
   static Future<FirebaseOptions> get currentPlatform async {
-    if (kIsWeb)
-      return web; // Ahora llamará al getter que lee de dotenv con éxito
+    if (!kIsWeb) {
+      throw UnsupportedError(
+        'Firebase sólo está configurado para web.',
+      );
+    }
 
-    throw UnsupportedError(
-      'Firebase sólo está configurado para web. Registra la app Android/iOS en '
-      'la consola de Firebase y ejecuta `flutterfire configure`.',
-    );
+    const requiredValues = {
+      'FIREBASE_API_KEY': String.fromEnvironment('FIREBASE_API_KEY'),
+      'FIREBASE_AUTH_DOMAIN': String.fromEnvironment('FIREBASE_AUTH_DOMAIN'),
+      'FIREBASE_PROJECT_ID': String.fromEnvironment('FIREBASE_PROJECT_ID'),
+      'FIREBASE_STORAGE_BUCKET':
+          String.fromEnvironment('FIREBASE_STORAGE_BUCKET'),
+      'FIREBASE_MESSAGING_SENDER_ID':
+          String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
+      'FIREBASE_APP_ID': String.fromEnvironment('FIREBASE_APP_ID'),
+    };
+
+    final missing = requiredValues.entries
+        .where((entry) => entry.value.isEmpty)
+        .map((entry) => entry.key)
+        .toList();
+
+    if (missing.isNotEmpty) {
+      throw StateError(
+        'Faltan variables de Firebase: ${missing.join(', ')}',
+      );
+    }
+
+    return web;
   }
 
-  // 2. Se convierte en getter para que lea las variables EN EL MOMENTO de ser consultado
   static const FirebaseOptions web = FirebaseOptions(
     apiKey: String.fromEnvironment('FIREBASE_API_KEY'),
     authDomain: String.fromEnvironment('FIREBASE_AUTH_DOMAIN'),
     projectId: String.fromEnvironment('FIREBASE_PROJECT_ID'),
     storageBucket: String.fromEnvironment('FIREBASE_STORAGE_BUCKET'),
-    messagingSenderId: String.fromEnvironment(
-      'FIREBASE_MESSAGING_SENDER_ID',
-    ),
+    messagingSenderId: String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
     appId: String.fromEnvironment('FIREBASE_APP_ID'),
   );
 }
