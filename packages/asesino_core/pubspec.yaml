@@ -1,0 +1,8 @@
+name: asesino_core
+description: Motor de reglas y coordinación de EL ASESINO. Dart puro, sin Flutter ni Firebase.
+version: 0.9.0-beta.1
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dev_dependencies:
+  test: ^1.25.0

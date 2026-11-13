@@ -1,0 +1,213 @@
+rules_version = '2';
+
+// EL ASESINO — EL PUEBLO DUERME
+//
+// Modelo de confianza (leer docs/SECURITY.md): no hay servidor autoritativo.
+// Estas reglas protegen la CONFIDENCIALIDAD (nadie lee roles ajenos) y limitan
+// qué puede escribir cada cual, pero NO pueden sustituir a Cloud Functions:
+// un anfitrión con el cliente modificado puede manipular la partida que modera.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ----------------------------------------------------------- utilidades
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+
+    function roomRef(roomId) {
+      return /databases/$(database)/documents/rooms/$(roomId);
+    }
+    function room(roomId) { return get(roomRef(roomId)).data; }
+    function roomExists(roomId) { return exists(roomRef(roomId)); }
+
+    function memberRef(roomId, u) {
+      return /databases/$(database)/documents/rooms/$(roomId)/members/$(u);
+    }
+    function isHost(roomId) {
+      return signedIn() && roomExists(roomId) && room(roomId).hostUid == uid();
+    }
+    function isMember(roomId) {
+      return signedIn() && exists(memberRef(roomId, uid()));
+    }
+    function isAliveMember(roomId) {
+      return isMember(roomId) && get(memberRef(roomId, uid())).data.alive == true;
+    }
+
+    // Transiciones de fase permitidas (el anfitrión no puede saltarse fases).
+    function validNext(from, to) {
+      return (from == 'lobby' && to == 'roleReveal')
+          || (from == 'roleReveal' && to == 'night')
+          || (from == 'night' && to == 'dawn')
+          || (from == 'dawn' && to == 'discussion')
+          || (from == 'discussion' && to == 'voting')
+          || (from == 'voting' && to == 'voteResult')
+          || (from == 'voteResult' && (to == 'voting' || to == 'night'))
+          || (from == 'finished' && to == 'lobby')
+          || (to == 'finished' && from != 'lobby' && from != 'finished');
+    }
+
+    // ---------------------------------------------------------------- salas
+    match /rooms/{roomId} {
+
+      // Se puede leer una sala conociendo su código, pero no listar salas.
+      allow get: if signedIn();
+      allow list: if false;
+
+      allow create: if signedIn()
+        && roomId.matches('^[A-Z2-9]{6}$')
+        && request.resource.data.code == roomId
+        && request.resource.data.hostUid == uid()
+        && request.resource.data.phase == 'lobby'
+        && request.resource.data.version == 1
+        && request.resource.data.hostHeartbeat == request.time
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 40;
+
+      allow update: if signedIn() && (
+        // Latido del anfitrión (sin cambio de versión).
+        ( resource.data.hostUid == uid()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hostHeartbeat'])
+          && request.resource.data.hostHeartbeat == request.time )
+        ||
+        // Transición escrita por el anfitrión.
+        ( resource.data.hostUid == uid()
+          && request.resource.data.hostUid == uid()
+          && request.resource.data.code == resource.data.code
+          && request.resource.data.createdAtMs == resource.data.createdAtMs
+          && request.resource.data.version == resource.data.version + 1
+          && ( request.resource.data.round >= resource.data.round
+               || request.resource.data.phase == 'lobby' )   // la revancha reinicia la ronda
+          && ( request.resource.data.phase == resource.data.phase
+               || validNext(resource.data.phase, request.resource.data.phase) ) )
+        ||
+        // Relevo: un miembro toma el control si el anfitrión lleva >45 s sin latir.
+        ( isMember(roomId)
+          && request.time > resource.data.hostHeartbeat + duration.value(45, 's')
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['hostUid', 'hostHeartbeat', 'version'])
+          && request.resource.data.hostUid == uid()
+          && request.resource.data.hostHeartbeat == request.time
+          && request.resource.data.version == resource.data.version + 1 )
+      );
+
+      allow delete: if isHost(roomId);
+
+      // ------------------------------------------------------- miembros
+      match /members/{memberId} {
+        // Un jugador puede leer su PROPIO documento aunque aún no exista:
+        // joinRoom lo consulta antes de crearlo para detectar reentradas.
+        allow get: if signedIn()
+          && (memberId == uid() || isMember(roomId) || isHost(roomId));
+
+        // Listar miembros sigue reservado a jugadores y anfitrión.
+        allow list: if isMember(roomId) || isHost(roomId);
+
+        allow create: if signedIn()
+          && memberId == uid()
+          && request.resource.data.keys().hasOnly(
+               ['uid', 'name', 'joinedAtMs', 'alive', 'online', 'revealedRole', 'left', 'isNarrator'])
+          && request.resource.data.uid == uid()
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 1
+          && request.resource.data.name.size() <= 20
+          && request.resource.data.alive == true
+          && request.resource.data.left == false
+          && request.resource.data.revealedRole == null
+          && ( request.resource.data.isNarrator == false || isHost(roomId) )
+          && room(roomId).phase == 'lobby';
+
+        allow update: if signedIn() && (
+          // El anfitrión gestiona estado de juego (vivo, rol revelado, presencia...).
+          ( isHost(roomId)
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['alive', 'online', 'revealedRole', 'isNarrator', 'left', 'name']) )
+          ||
+          // Un jugador puede cambiarse el nombre en el lobby...
+          ( memberId == uid() && room(roomId).phase == 'lobby'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+            && request.resource.data.name is string
+            && request.resource.data.name.size() >= 1
+            && request.resource.data.name.size() <= 20 )
+          ||
+          // ...o marcar que abandona la partida en curso.
+          ( memberId == uid() && room(roomId).phase != 'lobby'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['left'])
+            && request.resource.data.left == true )
+        );
+
+        allow delete: if (memberId == uid() && room(roomId).phase == 'lobby') || isHost(roomId);
+      }
+
+      // ------------------------------------------------ presencia (latidos)
+      match /presence/{memberId} {
+        allow read: if isHost(roomId);
+        allow create, update: if signedIn() && memberId == uid() && isMember(roomId)
+          && request.resource.data.keys().hasOnly(['ts'])
+          && request.resource.data.ts == request.time;
+        allow delete: if isHost(roomId);
+      }
+
+      // --------------------------------------- secretos de cada jugador
+      // Sólo el dueño y el anfitrión (moderador) pueden leerlos.
+      match /private/{memberId} {
+        allow read: if signedIn() && (memberId == uid() || isHost(roomId));
+        allow write: if isHost(roomId);
+      }
+
+      // Copia de recuperación del estado completo (incluye todos los roles).
+      match /hostState/{docId} {
+        allow read, write: if isHost(roomId);
+      }
+
+      // ------------------------------------------------ acciones nocturnas
+      // Sólo se pueden CREAR (una por jugador y noche): sin ediciones ni
+      // duplicados. Las lee el anfitrión y su autor.
+      match /actions/{actionId} {
+        allow read: if isHost(roomId)
+          || (signedIn() && resource.data.uid == uid());
+
+        allow create: if isAliveMember(roomId)
+          && request.resource.data.keys().hasOnly(['uid', 'round', 'role', 'targets', 'opId'])
+          && request.resource.data.uid == uid()
+          && request.resource.data.round is int
+          && actionId == string(request.resource.data.round) + '_' + uid()
+          && room(roomId).phase == 'night'
+          && request.resource.data.round == room(roomId).round
+          && request.resource.data.role == room(roomId).nightStep
+          && get(/databases/$(database)/documents/rooms/$(roomId)/private/$(uid())).data.role
+               == request.resource.data.role
+          && request.resource.data.targets is list
+          && request.resource.data.targets.size() <= 2
+          && request.resource.data.opId is string
+          && request.resource.data.opId.size() <= 40;
+
+        allow update: if false;
+        allow delete: if isHost(roomId);
+      }
+
+      // ------------------------------------------------------------- votos
+      // Voto secreto de verdad: sólo lo leen el anfitrión y su autor.
+      match /votes/{voteId} {
+        allow read: if isHost(roomId)
+          || (signedIn() && resource.data.uid == uid());
+
+        allow create: if isAliveMember(roomId)
+          && request.resource.data.keys().hasOnly(['uid', 'seq', 'target'])
+          && request.resource.data.uid == uid()
+          && request.resource.data.seq is int
+          && voteId == string(request.resource.data.seq) + '_' + uid()
+          && room(roomId).phase == 'voting'
+          && request.resource.data.seq == room(roomId).voteSeq
+          && request.resource.data.target is string
+          && request.resource.data.target.size() <= 40;
+
+        allow update: if false;
+        allow delete: if isHost(roomId);
+      }
+    }
+
+    // Todo lo demás, denegado.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
