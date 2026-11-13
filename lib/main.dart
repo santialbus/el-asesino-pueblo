@@ -17,7 +17,7 @@ Future<void> main() async {
   try {
     final prefs = await SharedPreferences.getInstance();
     await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
+      options: await DefaultFirebaseOptions.currentPlatform,
     );
     final auth = FirebaseAuth.instance;
     // Autenticación anónima: se entra a jugar sin registrarse.
