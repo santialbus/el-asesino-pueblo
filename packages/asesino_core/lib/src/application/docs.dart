@@ -439,5 +439,48 @@ class VoteDoc {
       );
 }
 
+/// `rooms/{code}/chat/{id}` — mensaje de chat de la sala.
+class ChatMessage {
+  const ChatMessage({
+    required this.id,
+    required this.uid,
+    required this.name,
+    required this.text,
+    required this.tsMs,
+  });
+  final String id;
+  final String uid;
+  final String name;
+  final String text;
+  final int tsMs;
+
+  static const int maxLength = 200;
+
+  /// Fases en las que se puede escribir. De noche el chat está cerrado.
+  static const Set<Phase> openPhases = {
+    Phase.lobby,
+    Phase.dawn,
+    Phase.discussion,
+    Phase.voting,
+    Phase.voteResult,
+    Phase.finished,
+  };
+
+  /// ¿Puede [alive]/[phase] escribir? Los eliminados sólo hablan en el lobby
+  /// y al terminar la partida.
+  static bool canWrite(Phase phase, {required bool alive}) {
+    if (!openPhases.contains(phase)) return false;
+    if (phase == Phase.lobby || phase == Phase.finished) return true;
+    return alive;
+  }
+
+  static String? validateText(String text) {
+    final t = text.trim();
+    if (t.isEmpty) return 'Escribe un mensaje.';
+    if (t.length > maxLength) return 'Máximo $maxLength caracteres.';
+    return null;
+  }
+}
+
 /// Texto de utilidad: nombre del rol.
 String roleName(RoleId r) => RoleInfo.of(r).name;

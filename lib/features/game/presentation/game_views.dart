@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme.dart';
+import '../../../core/services/settings.dart';
 import '../../../shared/widgets/controls.dart';
+import '../../../shared/widgets/effects.dart';
 import '../../../shared/widgets/game_widgets.dart';
 import '../../../shared/widgets/role_card.dart';
 import '../../lobby/create_screen.dart' show friendlyError;
@@ -410,6 +412,7 @@ class DawnView extends StatelessWidget {
     final deaths = room.dawn?.deaths ?? const <Death>[];
     return Column(
       children: [
+        const SunriseGlow(),
         const SizedBox(height: 8),
         PhaseHeader(
           label: 'Amanecer · día ${room.round}',
@@ -423,17 +426,26 @@ class DawnView extends StatelessWidget {
         NarrationText(room.narration.text, size: 19),
         const SizedBox(height: 24),
         if (deaths.isEmpty)
-          Text(
-            room.dawn?.saved == true
-                ? 'Alguien se salvó por poco.'
-                : 'Nadie ha muerto esta noche.',
-            style: AppText.title(18, color: AppColors.town),
+          Staggered(
+            index: 2,
+            stepMs: 500,
+            child: Text(
+              room.dawn?.saved == true
+                  ? 'Alguien se salvó por poco.'
+                  : 'Nadie ha muerto esta noche.',
+              style: AppText.title(18, color: AppColors.town),
+            ),
           ),
-        for (final d in deaths)
-          _DeathCard(
-            death: d,
-            members: members,
-            reveal: room.config.revealRoleOnDeath,
+        // Las muertes se revelan una a una, con suspense.
+        for (var i = 0; i < deaths.length; i++)
+          Staggered(
+            index: i + 2,
+            stepMs: 650,
+            child: _DeathCard(
+              death: deaths[i],
+              members: members,
+              reveal: room.config.revealRoleOnDeath,
+            ),
           ),
         CluesPanel(me: me, members: members, onlyRound: room.round),
       ],
@@ -746,10 +758,14 @@ class VoteResultView extends StatelessWidget {
         NarrationText(room.narration.text, size: 18),
         const SizedBox(height: 18),
         if (out != null)
-          _DeathCard(
-            death: Death(out.uid, DeathCause.vote),
-            members: members,
-            reveal: room.config.revealRoleOnDeath,
+          Staggered(
+            index: 2,
+            stepMs: 500,
+            child: _DeathCard(
+              death: Death(out.uid, DeathCause.vote),
+              members: members,
+              reveal: room.config.revealRoleOnDeath,
+            ),
           ),
         const SectionLabel('Votos'),
         if (tally.isEmpty)
@@ -873,10 +889,22 @@ class _FinalViewState extends ConsumerState<FinalView> {
         const SizedBox(height: 28),
         Text('FIN', textAlign: TextAlign.center, style: AppText.label(13)),
         const SizedBox(height: 8),
-        Text(
-          title.toUpperCase(),
-          textAlign: TextAlign.center,
-          style: AppText.title(30, color: color),
+        TweenAnimationBuilder<double>(
+          tween: Tween(
+            begin: ref.watch(settingsProvider).reduceMotion ? 1 : 0,
+            end: 1,
+          ),
+          duration: const Duration(milliseconds: 1500),
+          curve: Curves.easeOutCubic,
+          builder: (_, t, child) => Opacity(
+            opacity: t,
+            child: Transform.scale(scale: 0.88 + 0.12 * t, child: child),
+          ),
+          child: Text(
+            title.toUpperCase(),
+            textAlign: TextAlign.center,
+            style: AppText.title(30, color: color, spacing: 3),
+          ),
         ),
         const SizedBox(height: 10),
         const Center(child: OrnamentDivider(width: 220)),
@@ -897,10 +925,16 @@ class _FinalViewState extends ConsumerState<FinalView> {
         for (final m in players)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: _FinalRow(
-              member: m,
-              role: room.finalRoles[m.uid],
-              isMe: m.uid == widget.myUid,
+            // Los personajes se desvelan de uno en uno.
+            child: Staggered(
+              index: players.indexOf(m),
+              stepMs: 170,
+              baseMs: 900,
+              child: _FinalRow(
+                member: m,
+                role: room.finalRoles[m.uid],
+                isMe: m.uid == widget.myUid,
+              ),
             ),
           ),
         const SizedBox(height: 18),

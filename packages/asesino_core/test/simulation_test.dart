@@ -57,9 +57,7 @@ void main() {
       }
     }
 
-    test(
-        'con todas las reglas alternativas (revote, voto público, mayoría estricta, enamorados)',
-        () async {
+    test('con todas las reglas alternativas (revote, voto público, mayoría estricta, enamorados)', () async {
       final cfg = GameConfig.recommended(12).copyWith(
         tieRule: TieRule.revote,
         secretVotes: false,
@@ -81,8 +79,7 @@ void main() {
     });
 
     test('tieRule random y sin abstención', () async {
-      final cfg = GameConfig.recommended(9)
-          .copyWith(tieRule: TieRule.random, allowAbstain: false);
+      final cfg = GameConfig.recommended(9).copyWith(tieRule: TieRule.random, allowAbstain: false);
       final w = await World.create(9, config: cfg, seed: 21);
       await w.host.startGame();
       await w.playToEnd();
@@ -123,47 +120,36 @@ void main() {
   });
 
   group('Privacidad (reglas emuladas)', () {
-    test(
-        'un jugador no puede leer roles, acciones, votos ni estado del anfitrión',
-        () async {
+    test('un jugador no puede leer roles, acciones, votos ni estado del anfitrión', () async {
       final w = await World.create(8, seed: 6);
       await w.host.startGame();
       await settle();
       final other = w.backends[3];
-      expect(await streamError(other.watchPrivate(w.code, 'u1')),
-          isA<PermissionDeniedException>());
-      expect(await streamError(other.watchActions(w.code, 1)),
-          isA<PermissionDeniedException>());
-      expect(await streamError(other.watchVotes(w.code, 1)),
-          isA<PermissionDeniedException>());
-      expect(await streamError(other.watchPresence(w.code)),
-          isA<PermissionDeniedException>());
-      expect(await errorOf(() => other.readHostState(w.code)),
-          isA<PermissionDeniedException>());
+      expect(await streamError(other.watchPrivate(w.code, 'u1')), isA<PermissionDeniedException>());
+      expect(await streamError(other.watchActions(w.code, 1)), isA<PermissionDeniedException>());
+      expect(await streamError(other.watchVotes(w.code, 1)), isA<PermissionDeniedException>());
+      expect(await streamError(other.watchPresence(w.code)), isA<PermissionDeniedException>());
+      expect(await errorOf(() => other.readHostState(w.code)), isA<PermissionDeniedException>());
       // Su propio documento sí.
       expect(await streamError(other.watchPrivate(w.code, 'u3')), isNull);
       await w.dispose();
     });
 
-    test('durante la partida la sala pública no contiene roles de vivos',
-        () async {
+    test('durante la partida la sala pública no contiene roles de vivos', () async {
       final w = await World.create(10, seed: 7);
       await w.host.startGame();
       var leaks = 0;
       await w.playToEnd(onTick: (r) {
         if (r.phase != Phase.finished && r.finalRoles.isNotEmpty) leaks++;
         for (final m in w.server.membersOf(w.code).values) {
-          if (m.alive && m.revealedRole != null && r.phase != Phase.finished)
-            leaks++;
+          if (m.alive && m.revealedRole != null && r.phase != Phase.finished) leaks++;
         }
       });
       expect(leaks, 0);
       await w.dispose();
     });
 
-    test(
-        'cada jugador recibe sólo su rol; los asesinos conocen a sus compañeros',
-        () async {
+    test('cada jugador recibe sólo su rol; los asesinos conocen a sus compañeros', () async {
       final w = await World.create(12, seed: 8);
       await w.host.startGame();
       await settle();
@@ -171,26 +157,17 @@ void main() {
       final privates = w.server.privatesOf(w.code);
       for (final p in st.players) {
         expect(privates[p.uid]!.role, p.role);
-        if (p.role != RoleId.assassin)
-          expect(privates[p.uid]!.teammates, isEmpty);
+        if (p.role != RoleId.assassin) expect(privates[p.uid]!.teammates, isEmpty);
       }
-      final assassins = st.players
-          .where((p) => p.role == RoleId.assassin)
-          .map((p) => p.uid)
-          .toList();
+      final assassins = st.players.where((p) => p.role == RoleId.assassin).map((p) => p.uid).toList();
       for (final a in assassins) {
-        expect(privates[a]!.teammates.toSet(),
-            assassins.where((x) => x != a).toSet());
+        expect(privates[a]!.teammates.toSet(), assassins.where((x) => x != a).toSet());
       }
       await w.dispose();
     });
 
-    test('voto secreto: el resultado público no incluye quién votó a quién',
-        () async {
-      final w = await World.create(8,
-          seed: 9,
-          config: GameConfig.recommended(8)
-              .copyWith(secretVotes: true, cupid: false, blocker: false));
+    test('voto secreto: el resultado público no incluye quién votó a quién', () async {
+      final w = await World.create(8, seed: 9, config: GameConfig.recommended(8).copyWith(secretVotes: true, cupid: false, blocker: false));
       await w.host.startGame();
       var seenResult = false;
       var leaked = false;
@@ -207,15 +184,11 @@ void main() {
     });
 
     test('voto público: el resultado incluye los votos', () async {
-      final w = await World.create(8,
-          seed: 9,
-          config: GameConfig.recommended(8)
-              .copyWith(secretVotes: false, cupid: false, blocker: false));
+      final w = await World.create(8, seed: 9, config: GameConfig.recommended(8).copyWith(secretVotes: false, cupid: false, blocker: false));
       await w.host.startGame();
       var withVotes = false;
       await w.playToEnd(onTick: (r) {
-        if (r.voteResult != null && r.voteResult!.votes.isNotEmpty)
-          withVotes = true;
+        if (r.voteResult != null && r.voteResult!.votes.isNotEmpty) withVotes = true;
       });
       expect(withVotes, true);
       await w.dispose();
@@ -234,16 +207,13 @@ void main() {
         await settle();
       }
       expect(w.room.nightStep, RoleId.assassin);
-      final assassin =
-          w.host.state!.players.firstWhere((p) => p.role == RoleId.assassin);
-      final target =
-          w.host.state!.players.firstWhere((p) => p.role == RoleId.civilian);
+      final assassin = w.host.state!.players.firstWhere((p) => p.role == RoleId.assassin);
+      final target = w.host.state!.players.firstWhere((p) => p.role == RoleId.civilian);
       final b = w.backends[int.parse(assassin.uid.substring(1))];
       final room = w.room;
       final pa = PlayerActions(b, w.code);
       await pa.submitNight(room, RoleId.assassin, [target.uid]);
-      final err = await errorOf(
-          () => pa.submitNight(room, RoleId.assassin, [target.uid]));
+      final err = await errorOf(() => pa.submitNight(room, RoleId.assassin, [target.uid]));
       expect(err, isA<PermissionDeniedException>());
       await w.dispose();
     });
@@ -258,22 +228,16 @@ void main() {
         await settle();
       }
       final room = w.room;
-      final civ =
-          w.host.state!.players.firstWhere((p) => p.role == RoleId.civilian);
+      final civ = w.host.state!.players.firstWhere((p) => p.role == RoleId.civilian);
       final b = w.backends[int.parse(civ.uid.substring(1))];
-      final e1 = await errorOf(() =>
-          PlayerActions(b, w.code).submitNight(room, RoleId.assassin, ['u1']));
+      final e1 = await errorOf(() => PlayerActions(b, w.code).submitNight(room, RoleId.assassin, ['u1']));
       expect(e1, isA<PermissionDeniedException>());
       await w.dispose();
     });
 
-    test(
-        'el anfitrión descarta un voto inválido (a sí mismo) aunque llegue a Firestore',
-        () async {
+    test('el anfitrión descarta un voto inválido (a sí mismo) aunque llegue a Firestore', () async {
       final w = await World.create(7,
-          seed: 12,
-          config:
-              GameConfig.recommended(7).copyWith(cupid: false, blocker: false));
+          seed: 12, config: GameConfig.recommended(7).copyWith(cupid: false, blocker: false));
       await w.host.startGame();
       var guard = 0;
       while (w.room.phase != Phase.voting && guard++ < 600) {
@@ -290,8 +254,7 @@ void main() {
       final voter = w.host.state!.alive.firstWhere((p) => p.uid != 'u0');
       final b = w.backends[int.parse(voter.uid.substring(1))];
       // La regla emulada sólo comprueba fase/pertenencia; el motor decide la validez.
-      await b.submitVote(w.code,
-          VoteDoc(uid: voter.uid, seq: w.room.voteSeq, target: voter.uid));
+      await b.submitVote(w.code, VoteDoc(uid: voter.uid, seq: w.room.voteSeq, target: voter.uid));
       await settle();
       expect(w.host.rejectedLog.any((l) => l.contains('voto inválido')), true);
       await w.dispose();
@@ -329,8 +292,8 @@ void main() {
       final w = await World.create(6, seed: 1);
       await w.host.startGame();
       final late = w.server.client('late');
-      final err = await errorOf(() => late.joinRoom(w.code,
-          MemberDoc(uid: 'late', name: 'Tarde', joinedAtMs: w.clock.ms)));
+      final err = await errorOf(() => late.joinRoom(
+          w.code, MemberDoc(uid: 'late', name: 'Tarde', joinedAtMs: w.clock.ms)));
       expect(err, isA<RoomNotJoinableException>());
       await w.dispose();
     });
@@ -367,8 +330,7 @@ void main() {
   });
 
   group('Abandonos, desconexiones y cambio de anfitrión', () {
-    test('un jugador que abandona queda eliminado y la partida continúa',
-        () async {
+    test('un jugador que abandona queda eliminado y la partida continúa', () async {
       final w = await World.create(9, seed: 14);
       await w.host.startGame();
       await settle();
@@ -387,11 +349,9 @@ void main() {
       final w = await World.create(7, seed: 15);
       await w.host.startGame();
       await settle();
-      final assassins =
-          w.host.state!.players.where((p) => p.role == RoleId.assassin);
+      final assassins = w.host.state!.players.where((p) => p.role == RoleId.assassin);
       for (final a in assassins) {
-        await w.backends[int.parse(a.uid.substring(1))]
-            .leaveRoom(w.code, inGame: true);
+        await w.backends[int.parse(a.uid.substring(1))].leaveRoom(w.code, inGame: true);
       }
       await settle();
       expect(w.room.phase, Phase.finished);
@@ -399,8 +359,7 @@ void main() {
       await w.dispose();
     });
 
-    test('presencia aproximada: sin latidos el miembro pasa a desconectado',
-        () async {
+    test('presencia aproximada: sin latidos el miembro pasa a desconectado', () async {
       final w = await World.create(6, seed: 16);
       await settle();
       // Todos latieron una vez.
@@ -433,9 +392,7 @@ void main() {
       await w.dispose();
     });
 
-    test(
-        'caída del anfitrión: otro jugador toma el control y la partida termina',
-        () async {
+    test('caída del anfitrión: otro jugador toma el control y la partida termina', () async {
       for (final seed in [18, 19, 20]) {
         final w = await World.create(10, seed: seed);
         await w.host.startGame();
@@ -459,8 +416,7 @@ void main() {
         await w.host.stop();
         w.clock.advance(const Duration(seconds: 60));
         // Otro jugador (vivo, para poder seguir jugando) reclama el control.
-        final claimer =
-            w.bots.firstWhere((b) => b.uid != 'u0' && (b.self?.alive ?? false));
+        final claimer = w.bots.firstWhere((b) => b.uid != 'u0' && (b.self?.alive ?? false));
         expect(await claimer.backend.claimHost(w.code), true);
         expect(w.room.hostUid, claimer.uid);
 
@@ -488,8 +444,7 @@ void main() {
       }
     });
 
-    test('el anfitrión antiguo ya no puede escribir tras ser sustituido',
-        () async {
+    test('el anfitrión antiguo ya no puede escribir tras ser sustituido', () async {
       final w = await World.create(6, seed: 22);
       await w.host.startGame();
       await settle();
@@ -507,9 +462,9 @@ void main() {
     });
   });
 
+
   group('Modo local con bots', () {
-    test('BotDriver hace jugar a los bots hasta el final de la partida',
-        () async {
+    test('BotDriver hace jugar a los bots hasta el final de la partida', () async {
       final w = await World.create(8, seed: 31);
       // El "humano" (u0) también la juega un bot: aquí sólo se comprueba el conductor.
       final driver = BotDriver(w.bots, rng: Random(3));
@@ -551,24 +506,14 @@ void main() {
       final server = InMemoryServer(RealClock());
       final human = server.client('you');
       final code = RoomCodes.generate(Random(1));
-      final cfg = GameConfig.recommended(6).copyWith(
-          discussionSeconds: 10, votingSeconds: 10, nightStepSeconds: 5);
+      final cfg = GameConfig.recommended(6).copyWith(discussionSeconds: 10, votingSeconds: 10, nightStepSeconds: 5);
       final room = RoomDoc(
-        code: code,
-        name: 'Local',
-        hostUid: 'you',
-        narrator: NarratorMode.auto,
-        phase: Phase.lobby,
-        round: 0,
-        version: 1,
-        config: cfg,
-        createdAtMs: 0,
+        code: code, name: 'Local', hostUid: 'you', narrator: NarratorMode.auto,
+        phase: Phase.lobby, round: 0, version: 1, config: cfg, createdAtMs: 0,
       );
-      await human.createRoom(
-          room, const MemberDoc(uid: 'you', name: 'Tú', joinedAtMs: 0));
+      await human.createRoom(room, const MemberDoc(uid: 'you', name: 'Tú', joinedAtMs: 0));
       for (var i = 0; i < 5; i++) {
-        await server.client('b$i').joinRoom(
-            code, MemberDoc(uid: 'b$i', name: kBotNames[i], joinedAtMs: i + 1));
+        await server.client('b$i').joinRoom(code, MemberDoc(uid: 'b$i', name: kBotNames[i], joinedAtMs: i + 1));
       }
       final host = HostCoordinator(backend: human, roomId: code, room: room);
       await host.start();
@@ -580,9 +525,107 @@ void main() {
     });
   });
 
+
+  group('Chat de sala', () {
+    test('lobby: todos escriben y todos los miembros leen', () async {
+      final w = await World.create(5, seed: 41);
+      await w.backends[1].sendChat(w.code, '  hola a todos  ');
+      await w.backends[2].sendChat(w.code, 'buenas');
+      final msgs = await w.backends[3].watchChat(w.code).first;
+      expect(msgs.map((m) => m.text).toList(), ['hola a todos', 'buenas']);
+      expect(msgs.first.name, 'Jugador 1'); // el nombre sale del miembro, no del cliente
+      await w.dispose();
+    });
+
+    test('un no miembro no puede leer ni escribir', () async {
+      final w = await World.create(5, seed: 41);
+      final out = w.server.client('intruso');
+      expect(await streamError(out.watchChat(w.code)), isA<PermissionDeniedException>());
+      expect(await errorOf(() => out.sendChat(w.code, 'hola')), isA<PermissionDeniedException>());
+      await w.dispose();
+    });
+
+    test('mensajes vacíos o demasiado largos se rechazan', () async {
+      final w = await World.create(5, seed: 41);
+      expect(await errorOf(() => w.backends[1].sendChat(w.code, '   ')), isA<PermissionDeniedException>());
+      expect(await errorOf(() => w.backends[1].sendChat(w.code, 'x' * 201)), isA<PermissionDeniedException>());
+      await w.dispose();
+    });
+
+    test('de noche el chat está cerrado y de día hablan los vivos, no los muertos', () async {
+      final w = await World.create(6, seed: 42, config: GameConfig.recommended(6).copyWith(cupid: false, blocker: false));
+      await w.host.startGame();
+      var guard = 0;
+      while (w.room.phase != Phase.night && guard++ < 100) {
+        w.clock.advance(const Duration(seconds: 1));
+        await w.host.tick();
+        await settle();
+      }
+      expect(await errorOf(() => w.backends[1].sendChat(w.code, 'de noche')), isA<PermissionDeniedException>());
+      // Pasa a la discusión sin que actúen los bots (nadie muere de noche).
+      guard = 0;
+      while (w.room.phase != Phase.discussion && guard++ < 400) {
+        w.clock.advance(const Duration(seconds: 1));
+        await w.host.tick();
+        await settle();
+      }
+      expect(w.room.phase, Phase.discussion);
+      await w.backends[1].sendChat(w.code, 'de día');
+      // Un jugador eliminado ya no puede escribir.
+      await w.host.advance();
+      await settle();
+      // Abandona un civil (así la partida no termina y el chat sigue sujeto a las reglas).
+      final civ = w.host.state!.players.firstWhere((p) => p.role == RoleId.civilian);
+      final b = w.backends[int.parse(civ.uid.substring(1))];
+      await b.leaveRoom(w.code, inGame: true);
+      await settle();
+      expect(w.server.membersOf(w.code)[civ.uid]!.alive, false);
+      expect(w.room.phase, Phase.voting);
+      expect(await errorOf(() => b.sendChat(w.code, 'desde el más allá')),
+          isA<PermissionDeniedException>());
+      await w.dispose();
+    });
+
+    test('los bots charlan en el debate y la partida sigue terminando', () async {
+      final w = await World.create(8, seed: 43);
+      await w.host.startGame();
+      var chats = 0;
+      await w.playToEnd(onTick: (r) {
+        if (r.phase == Phase.discussion) {
+          chats = w.server.chatCount(w.code);
+        }
+      });
+      expect(chats, greaterThan(0));
+      expectFinishedCleanly(w, 8);
+      await w.dispose();
+    });
+  });
+
+  group('Bots que respetan a un jugador protegido', () {
+    test('nunca lo atacan ni lo votan', () async {
+      for (final seed in [51, 52, 53]) {
+        final w = await World.create(8, seed: seed);
+        for (final b in w.bots) {
+          b.spare = {'u0'};
+        }
+        await w.host.startGame();
+        var u0Died = false;
+        await w.playToEnd(onTick: (r) {
+          final m = w.server.membersOf(w.code)['u0'];
+          if (m != null && !m.alive) u0Died = true;
+        });
+        // u0 nunca es atacado por asesinos ni votado por bots; sólo podría
+        // caer por la cadena de enamorados, que aquí es posible con Cupido.
+        if (!w.host.state!.lovers.contains('u0')) {
+          expect(u0Died, false, reason: 'semilla $seed');
+        }
+        await w.dispose();
+      }
+    });
+  });
+
   group('Revancha', () {
-    test('tras terminar se puede volver al lobby y jugar otra partida',
-        () async {
+    test('tras terminar se puede volver al lobby y jugar otra partida', () async {
       final w = await World.create(7, seed: 23);
       await w.host.startGame();
       await w.playToEnd();
@@ -592,12 +635,7 @@ void main() {
       expect(w.room.phase, Phase.lobby);
       expect(w.room.winner, isNull);
       expect(w.room.finalRoles, isEmpty);
-      expect(
-          w.server
-              .membersOf(w.code)
-              .values
-              .every((m) => m.alive && m.revealedRole == null),
-          true);
+      expect(w.server.membersOf(w.code).values.every((m) => m.alive && m.revealedRole == null), true);
       await w.host.startGame();
       for (final b in w.bots) {
         b.reset();

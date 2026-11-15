@@ -6,9 +6,19 @@ import 'package:flutter/services.dart';
 
 import 'settings.dart';
 
-/// Música ambiental y retroalimentación háptica (vibración).
+/// Pistas de música. `lobby` es el ambiente original (también para la noche).
+enum Track { menu, lobby, day, tension }
+
+String _trackAsset(Track t) => switch (t) {
+  Track.menu => 'audio/menu.wav',
+  Track.lobby => 'audio/ambient.wav',
+  Track.day => 'audio/day.wav',
+  Track.tension => 'audio/tension.wav',
+};
+
+/// Música (varias pistas con fundido) y retroalimentación háptica (vibración).
 ///
-/// * La música es un único bucle (`ambient.wav`).
+/// * Una sola pista suena a la vez; al cambiar de fase se hace fundido cruzado.
 /// * Los efectos de los eventos se expresan con vibración: sólo funciona en
 ///   Android/iOS nativos (en web no hay vibración y simplemente no ocurre).
 /// * Todo es opcional y a prueba de fallos: si el dispositivo no puede, el
@@ -18,37 +28,73 @@ class AudioService {
 
   AppSettings _s = const AppSettings();
   AudioPlayer? _music;
-  bool _musicOn = false;
+  Track? _wanted; // pista que debería sonar
+  Track? _playing; // pista que está sonando
+  int _gen = 0; // invalida fundidos en curso al cambiar de pista
+
+  double get _targetVolume => _s.musicVolume * 0.6;
 
   void applySettings(AppSettings s) {
-    final musicChanged = s.music != _s.music || s.musicVolume != _s.musicVolume;
+    final was = _s;
     _s = s;
-    if (musicChanged && _musicOn) {
+    if (s.music != was.music) {
       if (!s.music) {
         _safe(() async => _music?.pause());
-      } else {
-        _safe(() async {
-          await _music?.setVolume(s.musicVolume * 0.6);
-          await _music?.resume();
-        });
+      } else if (_wanted != null) {
+        if (_playing == _wanted) {
+          _safe(() async {
+            await _music?.setVolume(_targetVolume);
+            await _music?.resume();
+          });
+        } else {
+          setTrack(_wanted!);
+        }
       }
+    } else if (s.musicVolume != was.musicVolume && _playing != null) {
+      _safe(() async => _music?.setVolume(_targetVolume));
     }
   }
 
-  /// Empieza el ambiente (llamar tras un gesto del usuario; el navegador lo exige).
-  Future<void> startMusic() => _safe(() async {
-    _musicOn = true;
-    if (!_s.music) return;
-    _music ??= AudioPlayer();
-    await _music!.setReleaseMode(ReleaseMode.loop);
-    await _music!.setVolume(_s.musicVolume * 0.6);
-    await _music!.play(AssetSource('audio/ambient.wav'));
+  /// Cambia la pista con fundido. Idempotente: si ya suena, no hace nada.
+  /// Llamar tras un gesto del usuario (el navegador lo exige para el audio).
+  Future<void> setTrack(Track t) => _safe(() async {
+    _wanted = t;
+    if (!_s.music || _playing == t) return;
+    final gen = ++_gen;
+    final p = _music ??= AudioPlayer();
+    if (_playing != null) {
+      await _fade(p, to: 0, ms: 500, gen: gen);
+      if (gen != _gen) return;
+    }
+    await p.setReleaseMode(ReleaseMode.loop);
+    await p.setVolume(0);
+    await p.play(AssetSource(_trackAsset(t)));
+    _playing = t;
+    await _fade(p, to: _targetVolume, ms: 800, gen: gen);
   });
 
   Future<void> stopMusic() => _safe(() async {
-    _musicOn = false;
+    _gen++;
+    _wanted = null;
+    _playing = null;
     await _music?.stop();
   });
+
+  Future<void> _fade(
+    AudioPlayer p, {
+    required double to,
+    required int ms,
+    required int gen,
+  }) async {
+    const steps = 10;
+    var from = to == 0 ? _targetVolume : 0.0;
+    if (to != 0 && ms == 0) from = to;
+    for (var i = 1; i <= steps; i++) {
+      if (gen != _gen) return;
+      await p.setVolume(from + (to - from) * i / steps);
+      await Future<void>.delayed(Duration(milliseconds: ms ~/ steps));
+    }
+  }
 
   // ---------------------------------------------------------------- vibración
 
@@ -137,6 +183,7 @@ class AudioService {
   });
 
   Future<void> dispose() async {
+    _gen++;
     await _safe(() async => _music?.dispose());
   }
 

@@ -10,14 +10,19 @@ import '../game/application/providers.dart';
 import 'create_screen.dart' show friendlyError;
 
 class JoinScreen extends ConsumerStatefulWidget {
-  const JoinScreen({super.key});
+  const JoinScreen({super.key, this.initialCode});
+
+  /// Código recibido por enlace directo (`/#CODIGO`).
+  final String? initialCode;
 
   @override
   ConsumerState<JoinScreen> createState() => _JoinScreenState();
 }
 
 class _JoinScreenState extends ConsumerState<JoinScreen> {
-  final TextEditingController _code = TextEditingController();
+  late final TextEditingController _code = TextEditingController(
+    text: widget.initialCode ?? '',
+  );
   late final TextEditingController _name = TextEditingController(
     text: ref.read(settingsProvider).playerName,
   );

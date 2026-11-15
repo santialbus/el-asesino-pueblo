@@ -39,3 +39,9 @@ final privateProvider = StreamProvider.autoDispose.family<PrivateDoc?, String>((
   final b = ref.watch(backendProvider);
   return b.watchPrivate(code, b.uid);
 });
+
+/// Últimos mensajes del chat de la sala (autoDispose: se cierra al salir).
+final chatProvider = StreamProvider.autoDispose
+    .family<List<ChatMessage>, String>(
+      (ref, code) => ref.watch(backendProvider).watchChat(code),
+    );

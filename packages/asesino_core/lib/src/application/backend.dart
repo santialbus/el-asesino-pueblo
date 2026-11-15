@@ -85,6 +85,13 @@ abstract class GameBackend {
   Future<void> leaveRoom(String roomId, {required bool inGame});
 
   Stream<RoomDoc?> watchRoom(String roomId);
+
+  /// Últimos mensajes del chat (orden cronológico).
+  Stream<List<ChatMessage>> watchChat(String roomId);
+
+  /// Envía un mensaje al chat de la sala (lanza si no está permitido).
+  Future<void> sendChat(String roomId, String text);
+
   Stream<List<MemberDoc>> watchMembers(String roomId);
   Stream<PrivateDoc?> watchPrivate(String roomId, String uid);
 

@@ -23,6 +23,21 @@ Además:
 * Si el anfitrión deja de latir >45 s, cualquier miembro puede tomar el relevo
   (la regla compara con la hora del **servidor**).
 
+## Chat
+`rooms/{code}/chat/*`: lo leen los miembros; escribe cualquier miembro **con su propio nombre**
+(la regla lo comprueba contra su documento), con 1–200 caracteres. De noche está cerrado y los
+eliminados sólo pueden hablar en el lobby y al terminar. La frecuencia (anti-spam) sólo se limita
+en el cliente: un cliente modificado podría saltársela.
+
+## Si el anfitrión también juega
+En la interfaz, el anfitrión **no ve** los roles ajenos (sólo su carta y sus pistas). A nivel de
+datos sí puede leerlos (es quien resuelve la noche), así que sólo los vería manipulando su cliente.
+Para una moderación sin ventaja, usa narrador humano que **no juega**.
+
+## Regla extra del motor
+Duelo de 2 vivos donde ninguno puede matar de noche: el empate se resuelve al azar (evita partidas
+infinitas).
+
 ## Qué NO se puede garantizar
 
 1. **El anfitrión ve todos los roles.** Necesita leerlos para resolver la noche.

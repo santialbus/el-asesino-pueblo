@@ -14,6 +14,7 @@ import '../game/application/providers.dart';
 import '../game/data/switchable_backend.dart';
 import '../game/presentation/room_screen.dart';
 import '../lobby/create_screen.dart' show friendlyError;
+import 'tutorial.dart';
 
 /// Configuración rápida de una partida de pruebas contra bots.
 class BotSetupScreen extends ConsumerStatefulWidget {
@@ -117,9 +118,13 @@ class BotGameScreen extends ConsumerStatefulWidget {
     super.key,
     required this.playerName,
     required this.players,
+    this.tutorial = false,
   });
   final String playerName;
   final int players;
+
+  /// Partida guiada: tú de Policía, bots que no te atacan y tarjetas guía.
+  final bool tutorial;
 
   @override
   ConsumerState<BotGameScreen> createState() => _BotGameScreenState();
@@ -130,6 +135,7 @@ class _BotGameScreenState extends ConsumerState<BotGameScreen> {
   BotDriver? _driver;
   String? _code;
   String? _error;
+  TutorialPlan? _plan;
   bool _closed = false;
 
   @override
@@ -143,18 +149,22 @@ class _BotGameScreenState extends ConsumerState<BotGameScreen> {
   Future<void> _setup() async {
     try {
       final rng = Random();
+      final plan = widget.tutorial ? const TutorialPlan() : null;
+      final total = plan?.players ?? widget.players;
       final server = InMemoryServer(RealClock());
       final me = server.client('tu');
       final code = RoomCodes.generate(rng);
       final now = DateTime.now().millisecondsSinceEpoch;
-      final cfg = GameConfig.recommended(widget.players).copyWith(
-        discussionSeconds: 60,
-        votingSeconds: 30,
-        nightStepSeconds: 15,
-      );
+      final cfg =
+          plan?.config ??
+          GameConfig.recommended(total).copyWith(
+            discussionSeconds: 60,
+            votingSeconds: 30,
+            nightStepSeconds: 15,
+          );
       final room = RoomDoc(
         code: code,
-        name: 'Partida con bots',
+        name: widget.tutorial ? 'Tutorial' : 'Partida con bots',
         hostUid: me.uid,
         narrator: NarratorMode.auto,
         phase: Phase.lobby,
@@ -169,7 +179,7 @@ class _BotGameScreenState extends ConsumerState<BotGameScreen> {
       );
 
       final bots = <BotPlayer>[];
-      for (var i = 0; i < widget.players - 1; i++) {
+      for (var i = 0; i < total - 1; i++) {
         final backend = server.client('bot$i');
         await backend.joinRoom(
           code,
@@ -179,10 +189,14 @@ class _BotGameScreenState extends ConsumerState<BotGameScreen> {
             joinedAtMs: now + i + 1,
           ),
         );
-        bots.add(BotPlayer(backend, code, Random(rng.nextInt(1 << 30))));
+        final bot = BotPlayer(backend, code, Random(rng.nextInt(1 << 30)));
+        if (plan != null)
+          bot.spare = {...plan.spare}; // no atacan ni votan al jugador
+        bots.add(bot);
       }
       _driver = BotDriver(bots, rng: rng)..start();
       _switch.useLocal(me);
+      _plan = plan;
       if (mounted) setState(() => _code = code);
     } catch (e) {
       if (mounted) setState(() => _error = friendlyError(e));
@@ -213,7 +227,7 @@ class _BotGameScreenState extends ConsumerState<BotGameScreen> {
   Widget build(BuildContext context) {
     if (_error != null) {
       return AsesinoPage(
-        title: 'Partida con bots',
+        title: widget.tutorial ? 'Tutorial' : 'Partida con bots',
         child: Column(
           children: [
             const SizedBox(height: 80),
@@ -227,6 +241,6 @@ class _BotGameScreenState extends ConsumerState<BotGameScreen> {
         body: Center(child: CircularProgressIndicator(color: AppColors.gold)),
       );
     }
-    return RoomScreen(code: _code!, onLocalExit: _exit);
+    return RoomScreen(code: _code!, onLocalExit: _exit, tutorial: _plan);
   }
 }

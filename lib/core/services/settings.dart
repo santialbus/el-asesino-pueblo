@@ -6,6 +6,7 @@ class AppSettings {
   const AppSettings({
     this.music = true,
     this.haptics = true,
+    this.notifications = false,
     this.musicVolume = 0.5,
     this.reduceMotion = false,
     this.playerName = '',
@@ -15,6 +16,9 @@ class AppSettings {
 
   /// Vibración como efecto de los eventos de la partida (sólo móvil nativo).
   final bool haptics;
+
+  /// Avisos de turno con la pestaña en segundo plano (sólo navegador).
+  final bool notifications;
   final double musicVolume;
   final bool reduceMotion;
   final String playerName;
@@ -22,6 +26,7 @@ class AppSettings {
   AppSettings copyWith({
     bool? music,
     bool? haptics,
+    bool? notifications,
     double? musicVolume,
     bool? reduceMotion,
     String? playerName,
@@ -48,6 +53,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
     return AppSettings(
       music: _p.getBool('music') ?? true,
       haptics: _p.getBool('haptics') ?? true,
+      notifications: _p.getBool('notifications') ?? false,
       musicVolume: _p.getDouble('musicVolume') ?? 0.5,
       reduceMotion: _p.getBool('reduceMotion') ?? false,
       playerName: _p.getString('playerName') ?? '',
@@ -58,6 +64,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = s;
     _p.setBool('music', s.music);
     _p.setBool('haptics', s.haptics);
+    _p.setBool('notifications', s.notifications);
     _p.setDouble('musicVolume', s.musicVolume);
     _p.setBool('reduceMotion', s.reduceMotion);
     _p.setString('playerName', s.playerName);

@@ -166,3 +166,31 @@ test('un jugador nuevo puede consultar su propio documento de miembro antes de u
   await assertSucceeds(setDoc(doc(db, 'rooms', CODE, 'members', 'nuevo'), member('nuevo')));
   await assertSucceeds(getDocs(collection(db, 'rooms', CODE, 'members')));    // ya miembro: sí
 });
+
+const chatMsg = (uid, name, text = 'hola') => ({ uid, name, text, ts: serverTimestamp(), expireAt: new Date(Date.now() + 86400000) });
+
+test('chat: los miembros escriben con su propio nombre y leen; los ajenos no', async () => {
+  const col = (u) => collection(as(u), 'rooms', CODE, 'chat');
+  await assertSucceeds(setDoc(doc(col('ana')), chatMsg('ana', 'ana')));                  // lobby
+  await assertFails(setDoc(doc(col('ana')), chatMsg('ana', 'bea')));                      // suplantar nombre
+  await assertFails(setDoc(doc(col('ana')), chatMsg('bea', 'bea')));                      // suplantar uid
+  await assertFails(setDoc(doc(col('ana')), chatMsg('ana', 'ana', '')));                  // vacío
+  await assertFails(setDoc(doc(col('ana')), chatMsg('ana', 'ana', 'x'.repeat(201))));     // demasiado largo
+  await assertFails(setDoc(doc(collection(as('intruso'), 'rooms', CODE, 'chat')), chatMsg('intruso', 'intruso')));
+  await assertSucceeds(getDocs(col('bea')));
+  await assertFails(getDocs(collection(as('intruso'), 'rooms', CODE, 'chat')));
+});
+
+test('chat: cerrado de noche; los eliminados sólo hablan en lobby y al final', async () => {
+  const send = (u) => setDoc(doc(collection(as(u), 'rooms', CODE, 'chat')), chatMsg(u, u));
+  await setPhase('night', { round: 1, version: 2 });
+  await assertFails(send('ana'));
+  await setPhase('discussion', { version: 3 });
+  await assertSucceeds(send('ana'));
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await updateDoc(doc(ctx.firestore(), 'rooms', CODE, 'members', 'bea'), { alive: false });
+  });
+  await assertFails(send('bea'));                       // eliminado en el debate
+  await setPhase('finished', { version: 4 });
+  await assertSucceeds(send('bea'));                    // al terminar sí
+});

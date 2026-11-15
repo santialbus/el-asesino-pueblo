@@ -7,7 +7,7 @@ packages/asesino_core/        Dart puro (sin Flutter ni Firebase): TODA la lógi
                               HostCoordinator (anfitrión), vistas de jugador
   lib/src/testing/            backend en memoria con reglas emuladas, relojes (falso/real)
                               y bots (BotPlayer/BotDriver, usados también por el modo local)
-  test/                       56 pruebas de dominio, 41 de simulación, 1 de estrés
+  test/                       63 pruebas de dominio, 47 de simulación, 1 de estrés
 lib/                          app Flutter
   app/                        tema (paleta) y raíz
   core/services/              ajustes, sesión, música y vibración

@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme.dart';
+import '../../core/services/audio_service.dart';
+import '../../core/services/settings.dart';
 import '../../shared/widgets/backdrop.dart';
 import '../../shared/widgets/controls.dart';
 import '../../shared/widgets/page.dart';
 import '../bots/bot_game.dart';
+import '../game/application/providers.dart';
 import '../lobby/create_screen.dart';
 import '../lobby/join_screen.dart';
 import '../settings/info_screen.dart';
@@ -16,6 +19,15 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // La música del menú arranca con el primer toque (el navegador exige un gesto).
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => ref.read(audioProvider).setTrack(Track.menu),
+      child: _page(context, ref),
+    );
+  }
+
+  Widget _page(BuildContext context, WidgetRef ref) {
     return AsesinoPage(
       scene: Scene.night,
       village: true,
@@ -82,6 +94,22 @@ class HomeScreen extends ConsumerWidget {
                           builder: (_) => const InfoScreen(),
                         ),
                       ),
+                    ),
+                    GhostButton(
+                      label: 'Tutorial guiado',
+                      icon: Icons.school_outlined,
+                      onPressed: () {
+                        final name = ref.read(settingsProvider).playerName;
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => BotGameScreen(
+                              playerName: name.isEmpty ? 'Tú' : name,
+                              players: 7,
+                              tutorial: true,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     GhostButton(
                       label: 'Partida con bots (pruebas)',

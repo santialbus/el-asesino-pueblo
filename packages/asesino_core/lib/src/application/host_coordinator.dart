@@ -264,13 +264,18 @@ class HostCoordinator {
   /// Errores que impiden empezar (vacío = se puede empezar).
   List<String> startErrors() => _room.config.validate(_participants.length);
 
-  Future<void> startGame() => _enqueue(() async {
+  Future<void> startGame({Map<String, RoleId> forcedRoles = const {}}) => _enqueue(() async {
         _requirePhase(Phase.lobby);
         final players = _participants;
         final errors = _room.config.validate(players.length);
         if (errors.isNotEmpty) throw GameStartException(errors);
 
-        final roles = RoleAssigner.assign([for (final p in players) p.uid], _room.config, _rng);
+        final roles = RoleAssigner.assign(
+          [for (final p in players) p.uid],
+          _room.config,
+          _rng,
+          forced: forcedRoles,
+        );
         final state = GameState(
           config: _room.config,
           phase: Phase.roleReveal,

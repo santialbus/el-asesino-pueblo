@@ -414,6 +414,49 @@ void main() {
       expect(o.deaths.map((d) => d.uid).toSet(), {'dani', 'eva'});
     });
 
+    test('duelo sin salida (2 vivos, ninguno puede matar): el empate se resuelve al azar', () {
+      const cfg = GameConfig(blocker: true, blockerTeam: Team.assassins, assassinsNeedStrictMajority: true);
+      for (final tie in TieRule.values) {
+        final s = GameState(
+          config: cfg.copyWith(tieRule: tie),
+          phase: Phase.voting,
+          round: 9,
+          players: const [
+            PlayerState(uid: 'p', name: 'p', role: RoleId.blocker),
+            PlayerState(uid: 'c', name: 'c', role: RoleId.civilian),
+          ],
+        );
+        final tied = VoteResolver.resolve(s, {'p': 'c', 'c': 'p'}, Random(1));
+        expect(tied.eliminated, isNotNull, reason: tie.name);
+        expect(tied.needsRevote, false);
+        final abst = VoteResolver.resolve(s, {'p': kAbstain, 'c': kAbstain}, Random(2));
+        expect(abst.eliminated, isNotNull, reason: 'abstención ${tie.name}');
+        // Se eliminan ambos resultados posibles según la semilla.
+        final seen = {
+          for (var seed = 0; seed < 30; seed++)
+            VoteResolver.resolve(s, {'p': 'c', 'c': 'p'}, Random(seed)).eliminated
+        };
+        expect(seen, {'p', 'c'});
+        // Si uno vota y el otro se abstiene, manda el voto (sin azar).
+        final one = VoteResolver.resolve(s, {'p': 'c', 'c': kAbstain}, Random(3));
+        expect(one.eliminated, 'c');
+      }
+    });
+
+    test('duelo normal (queda un asesino que sí mata): el empate no elimina a nadie', () {
+      const s = GameState(
+        config: GameConfig(),
+        phase: Phase.voting,
+        round: 9,
+        players: [
+          PlayerState(uid: 'a', name: 'a', role: RoleId.assassin),
+          PlayerState(uid: 'c', name: 'c', role: RoleId.civilian),
+        ],
+      );
+      final o = VoteResolver.resolve(s, {'a': 'c', 'c': 'a'}, Random(1));
+      expect(o.eliminated, isNull);
+    });
+
     test('sin votos no hay eliminación', () {
       expect(vote(day(), {}).eliminated, isNull);
     });
@@ -475,6 +518,63 @@ void main() {
       expect(PhaseMachine.afterVictoryCheck(hasWinner: true, fromDawn: true), Phase.finished);
       expect(PhaseMachine.afterVictoryCheck(hasWinner: false, fromDawn: true), Phase.discussion);
       expect(PhaseMachine.afterVictoryCheck(hasWinner: false, fromDawn: false), Phase.nextRound);
+    });
+  });
+
+  group('Roles forzados (tutorial)', () {
+    final uids = [for (var i = 0; i < 7; i++) 'u$i'];
+    final cfg = GameConfig.recommended(7);
+
+    test('el jugador forzado recibe su rol y el resto cuadra con la bolsa', () {
+      for (var seed = 0; seed < 20; seed++) {
+        final m = RoleAssigner.assign(uids, cfg, Random(seed), forced: {'u3': RoleId.police});
+        expect(m['u3'], RoleId.police);
+        int count(RoleId r) => m.values.where((x) => x == r).length;
+        expect(count(RoleId.police), 1);
+        expect(count(RoleId.assassin), 1);
+        expect(count(RoleId.doctor), 1);
+        expect(count(RoleId.civilian), 4);
+      }
+    });
+
+    test('es determinista y el resto se baraja', () {
+      final a = RoleAssigner.assign(uids, cfg, Random(5), forced: {'u0': RoleId.police});
+      final b = RoleAssigner.assign(uids, cfg, Random(5), forced: {'u0': RoleId.police});
+      expect(a, b);
+      final seen = {
+        for (var seed = 0; seed < 30; seed++)
+          RoleAssigner.assign(uids, cfg, Random(seed), forced: {'u0': RoleId.police})['u1']
+      };
+      expect(seen.length, greaterThan(1));
+    });
+
+    test('rechaza roles que no están en la configuración o jugadores desconocidos', () {
+      expect(() => RoleAssigner.assign(uids, cfg, Random(1), forced: {'u0': RoleId.cupid}),
+          throwsArgumentError);
+      expect(() => RoleAssigner.assign(uids, cfg, Random(1), forced: {'zzz': RoleId.police}),
+          throwsArgumentError);
+      expect(
+          () => RoleAssigner.assign(uids, cfg, Random(1),
+              forced: {'u0': RoleId.police, 'u1': RoleId.police}),
+          throwsArgumentError);
+    });
+  });
+
+  group('Chat: reglas', () {
+    test('sólo se escribe en fases abiertas; los eliminados sólo en lobby y final', () {
+      expect(ChatMessage.canWrite(Phase.night, alive: true), false);
+      expect(ChatMessage.canWrite(Phase.roleReveal, alive: true), false);
+      expect(ChatMessage.canWrite(Phase.discussion, alive: true), true);
+      expect(ChatMessage.canWrite(Phase.discussion, alive: false), false);
+      expect(ChatMessage.canWrite(Phase.voting, alive: true), true);
+      expect(ChatMessage.canWrite(Phase.lobby, alive: false), true);
+      expect(ChatMessage.canWrite(Phase.finished, alive: false), true);
+    });
+    test('validación del texto', () {
+      expect(ChatMessage.validateText('   '), isNotNull);
+      expect(ChatMessage.validateText('hola'), isNull);
+      expect(ChatMessage.validateText('x' * 201), isNotNull);
+      expect(ChatMessage.validateText('x' * 200), isNull);
     });
   });
 

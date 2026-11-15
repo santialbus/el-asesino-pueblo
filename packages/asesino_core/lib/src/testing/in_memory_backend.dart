@@ -36,6 +36,8 @@ class _RoomData {
   final Map<String, NightAction> actions = {};
   final Map<String, VoteDoc> votes = {};
   final Map<String, int> presence = {};
+  final List<ChatMessage> chat = [];
+  int chatSeq = 0;
   final StreamController<void> changes = StreamController.broadcast(sync: false);
 }
 
@@ -57,6 +59,7 @@ class InMemoryServer {
   Map<String, MemberDoc> membersOf(String id) => Map.of(_rooms[id]!.members);
   Map<String, PrivateDoc> privatesOf(String id) => Map.of(_rooms[id]!.privates);
   int actionCount(String id) => _rooms[id]!.actions.length;
+  int chatCount(String id) => _rooms[id]!.chat.length;
   int voteCount(String id) => _rooms[id]!.votes.length;
   bool exists(String id) => _rooms.containsKey(id);
 }
@@ -100,6 +103,7 @@ class InMemoryBackend implements GameBackend {
     if (v == null) return 'null';
     if (v is RoomDoc) return v.toMap().toString() + v.hostHeartbeatMs.toString();
     if (v is MemberDoc) return v.toMap().toString();
+    if (v is ChatMessage) return '${v.id}${v.text}';
     if (v is PrivateDoc) return v.toMap().toString();
     if (v is List) return v.map(_key).join('|');
     if (v is Map) return v.toString();
@@ -158,6 +162,38 @@ class InMemoryBackend implements GameBackend {
 
   @override
   Stream<RoomDoc?> watchRoom(String roomId) => _watch(roomId, _withBeat);
+
+  @override
+  Stream<List<ChatMessage>> watchChat(String roomId) {
+    final r = _server._rooms[roomId];
+    if (r == null) return Stream.error(RoomNotFoundException());
+    if (!_isMember(r) && !_isHost(r)) {
+      return Stream.error(PermissionDeniedException('chat'));
+    }
+    return _watch(roomId, (r) {
+      final all = r.chat;
+      return all.length > 60 ? all.sublist(all.length - 60) : List<ChatMessage>.of(all);
+    });
+  }
+
+  @override
+  Future<void> sendChat(String roomId, String text) async {
+    final r = _room(roomId);
+    final m = r.members[uid];
+    if (m == null) throw PermissionDeniedException('no eres miembro');
+    if (ChatMessage.validateText(text) != null) throw PermissionDeniedException('mensaje no válido');
+    if (!ChatMessage.canWrite(r.doc.phase, alive: m.alive)) {
+      throw PermissionDeniedException('chat cerrado para ti en esta fase');
+    }
+    r.chat.add(ChatMessage(
+      id: 'm${++r.chatSeq}',
+      uid: uid,
+      name: m.name,
+      text: text.trim(),
+      tsMs: _server.clock.ms,
+    ));
+    _changed(r);
+  }
 
   @override
   Stream<List<MemberDoc>> watchMembers(String roomId) {

@@ -96,7 +96,11 @@ service cloud.firestore {
         // Un jugador puede leer su PROPIO documento aunque aún no exista:
         // joinRoom lo consulta antes de crearlo para detectar reentradas.
         allow get: if signedIn()
-          && (memberId == uid() || isMember(roomId) || isHost(roomId));
+          && (
+            memberId == uid()
+            || isMember(roomId)
+            || isHost(roomId)
+          );
 
         // Listar miembros sigue reservado a jugadores y anfitrión.
         allow list: if isMember(roomId) || isHost(roomId);
@@ -104,7 +108,7 @@ service cloud.firestore {
         allow create: if signedIn()
           && memberId == uid()
           && request.resource.data.keys().hasOnly(
-               ['uid', 'name', 'joinedAtMs', 'alive', 'online', 'revealedRole', 'left', 'isNarrator'])
+               ['uid', 'name', 'joinedAtMs', 'alive', 'online', 'revealedRole', 'left', 'isNarrator', 'expireAt'])
           && request.resource.data.uid == uid()
           && request.resource.data.name is string
           && request.resource.data.name.size() >= 1
@@ -141,7 +145,7 @@ service cloud.firestore {
       match /presence/{memberId} {
         allow read: if isHost(roomId);
         allow create, update: if signedIn() && memberId == uid() && isMember(roomId)
-          && request.resource.data.keys().hasOnly(['ts'])
+          && request.resource.data.keys().hasOnly(['ts', 'expireAt'])
           && request.resource.data.ts == request.time;
         allow delete: if isHost(roomId);
       }
@@ -166,7 +170,7 @@ service cloud.firestore {
           || (signedIn() && resource.data.uid == uid());
 
         allow create: if isAliveMember(roomId)
-          && request.resource.data.keys().hasOnly(['uid', 'round', 'role', 'targets', 'opId'])
+          && request.resource.data.keys().hasOnly(['uid', 'round', 'role', 'targets', 'opId', 'expireAt'])
           && request.resource.data.uid == uid()
           && request.resource.data.round is int
           && actionId == string(request.resource.data.round) + '_' + uid()
@@ -184,6 +188,29 @@ service cloud.firestore {
         allow delete: if isHost(roomId);
       }
 
+      // ------------------------------------------------------------- chat
+      // Mensajes de texto de la sala. Los leen los miembros; escribe cualquier
+      // miembro con su propio nombre y sólo en fases abiertas (de noche está
+      // cerrado; los eliminados sólo hablan en el lobby y al terminar).
+      match /chat/{msgId} {
+        allow read: if isMember(roomId) || isHost(roomId);
+
+        allow create: if isMember(roomId)
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'text', 'ts', 'expireAt'])
+          && request.resource.data.uid == uid()
+          && request.resource.data.ts == request.time
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 200
+          && request.resource.data.name == get(memberRef(roomId, uid())).data.name
+          && room(roomId).phase in ['lobby', 'dawn', 'discussion', 'voting', 'voteResult', 'finished']
+          && ( room(roomId).phase in ['lobby', 'finished']
+               || get(memberRef(roomId, uid())).data.alive == true );
+
+        allow update: if false;
+        allow delete: if isHost(roomId);
+      }
+
       // ------------------------------------------------------------- votos
       // Voto secreto de verdad: sólo lo leen el anfitrión y su autor.
       match /votes/{voteId} {
@@ -191,7 +218,7 @@ service cloud.firestore {
           || (signedIn() && resource.data.uid == uid());
 
         allow create: if isAliveMember(roomId)
-          && request.resource.data.keys().hasOnly(['uid', 'seq', 'target'])
+          && request.resource.data.keys().hasOnly(['uid', 'seq', 'target', 'expireAt'])
           && request.resource.data.uid == uid()
           && request.resource.data.seq is int
           && voteId == string(request.resource.data.seq) + '_' + uid()

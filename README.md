@@ -36,6 +36,10 @@ flutter run -d chrome  # abre dos pestañas / navegadores para probar con 2+ jug
 Para una partida real hacen falta 5 jugadores como mínimo: abre 5 ventanas de
 navegador (una en incógnito por cada sesión anónima distinta) o usa varios dispositivos.
 
+> **Web / PWA:** `web_template/index.html` y `web_template/manifest.json` fijan el fondo oscuro, el
+> `theme-color` y los colores de la PWA (sin ellos iOS muestra franjas blancas). `tool/setup.sh` los
+> copia a `web/`. Si ya generaste `web/`, copia esos dos archivos a mano y vuelve a desplegar.
+
 ## 3. Pruebas
 ```bash
 # Motor de reglas y simulaciones de partidas completas (Dart puro)
@@ -64,12 +68,19 @@ flutter build ipa
 Publicar en Google Play o App Store tiene tarifas de registro **independientes de Firebase**.
 Nada de esto se hace automáticamente.
 
+## Funciones
+* **Chat de sala**, **tutorial guiado** (botón del inicio), **enlace directo** para unirse
+  (`https://tu-dominio/#CODIGO`; el lobby tiene «Copiar invitación» con el enlace) y **avisos de turno**
+  en el navegador (actívalos en Ajustes). La vibración sólo funciona en la app nativa.
+* **Caducidad automática de salas**: activa las políticas TTL (ver `docs/TTL.md`).
+* Hoja de ruta: `docs/FUTURO.md`. App Check: `docs/APPCHECK.md`.
+
 ## Probar sin otros jugadores
 En el inicio, **«Partida con bots (pruebas)»** crea una partida local (sin Firebase) contra
 bots que usan el mismo motor. Útil para ver todas las fases y probar la interfaz.
 
 ## Audio y fuentes
-* Música original sintetizada por `tool/gen_music.py` (sin licencias). Los efectos de los eventos son **vibración** (sólo Android/iOS nativos; en web no vibra).
+* Música original sintetizada (sin licencias): `tool/gen_music.py` (lobby/noche) y `tool/gen_tracks.py` (menú, día y votación). Los efectos de los eventos son **vibración** (sólo Android/iOS nativos; en web no vibra).
 * Fuentes Cinzel y Lora (SIL Open Font License; ver `assets/fonts/OFL-Cinzel.txt`).
 
 ## Estructura

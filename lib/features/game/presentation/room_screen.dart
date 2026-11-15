@@ -5,9 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme.dart';
+import '../../../core/platform/notifier.dart';
+import '../../../core/services/audio_service.dart';
 import '../../../core/services/settings.dart';
 import '../../../shared/widgets/backdrop.dart';
 import '../../../shared/widgets/controls.dart';
+import '../../../shared/widgets/effects.dart';
+import '../../bots/tutorial.dart';
+import '../../chat/chat_sheet.dart';
 import '../../lobby/create_screen.dart' show friendlyError;
 import '../../lobby/lobby_view.dart';
 import '../../settings/settings_screen.dart';
@@ -15,20 +20,31 @@ import '../application/providers.dart';
 import 'game_views.dart';
 import 'host_bar.dart';
 
+const String _baseTitle = 'El Asesino — El Pueblo Duerme';
+
 /// Contenedor de una sala: lobby y todas las fases de la partida.
 ///
 /// Responsabilidades (todas con ciclo de vida atado a esta pantalla):
 ///  * si este dispositivo es el anfitrión, ejecuta el [HostCoordinator];
 ///  * latido de presencia de cada jugador (1 escritura por minuto);
 ///  * detección de anfitrión caído y relevo;
-///  * vibración de los eventos de la narración y música ambiental.
+///  * música por fase, vibración de los eventos y avisos de turno;
+///  * chat de sala y destellos de los momentos clave.
 class RoomScreen extends ConsumerStatefulWidget {
-  const RoomScreen({super.key, required this.code, this.onLocalExit});
+  const RoomScreen({
+    super.key,
+    required this.code,
+    this.onLocalExit,
+    this.tutorial,
+  });
   final String code;
 
   /// Si no es null, es una partida local con bots (sin Firebase): al salir se
   /// llama a este callback en vez de borrar la sesión guardada.
   final VoidCallback? onLocalExit;
+
+  /// Si no es null, es el tutorial guiado (partida local con tarjetas guía).
+  final TutorialPlan? tutorial;
 
   @override
   ConsumerState<RoomScreen> createState() => _RoomScreenState();
@@ -41,11 +57,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
   Timer? _beat;
   Timer? _refresh;
   bool _starting = false;
+  bool _tutorialStarted = false;
   String? _hostError;
   final HostWatchdog _watchdog = HostWatchdog();
   String? _lastNarration;
-  bool _musicStarted = false;
+  String? _turnKey;
   bool _foreground = true;
+  bool _chatInit = false;
+  String? _chatSeenId;
 
   @override
   void initState() {
@@ -58,6 +77,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
       final r = next.valueOrNull;
       if (r != null) _onRoom(r);
     }, fireImmediately: true);
+    // El turno depende también de los miembros y del documento privado.
+    ref.listenManual<AsyncValue<PrivateDoc?>>(
+      privateProvider(widget.code),
+      (_, __) => _recheckTurn(),
+    );
+    ref.listenManual<AsyncValue<List<MemberDoc>>>(
+      membersProvider(widget.code),
+      (_, __) => _recheckTurn(),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) => _heartbeat());
     _beat = Timer.periodic(const Duration(seconds: 60), (_) => _heartbeat());
     _refresh = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -72,13 +100,17 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
     _refresh?.cancel();
     _ticker?.cancel();
     _host?.stop();
+    setTabTitle(_baseTitle);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
-    if (_foreground) _heartbeat();
+    if (_foreground) {
+      setTabTitle(_baseTitle);
+      _heartbeat();
+    }
   }
 
   Future<void> _heartbeat() async {
@@ -93,6 +125,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
 
   // ------------------------------------------------------------------ eventos
 
+  Track _trackFor(Phase p) => switch (p) {
+    Phase.voting => Track.tension,
+    Phase.dawn ||
+    Phase.discussion ||
+    Phase.voteResult ||
+    Phase.finished => Track.day,
+    _ => Track.lobby, // lobby, revelación y noche: el ambiente original
+  };
+
   void _onRoom(RoomDoc room) {
     _watchdog.onRoom(room);
     final myUid = ref.read(backendProvider).uid;
@@ -103,15 +144,61 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
     }
 
     final audio = ref.read(audioProvider);
-    if (!_musicStarted) {
-      _musicStarted = true;
-      audio.startMusic();
-    }
+    audio.setTrack(_trackFor(room.phase));
     final key = '${room.version}|${room.narration.text}';
     if (room.narration.text.isNotEmpty && key != _lastNarration) {
       final first = _lastNarration == null;
       _lastNarration = key;
       if (!first) audio.cue(room.narration.cue); // vibración del evento
+    }
+    _checkTurn(room);
+  }
+
+  void _recheckTurn() {
+    final room = ref.read(roomProvider(widget.code)).valueOrNull;
+    if (room != null) _checkTurn(room);
+  }
+
+  /// Avisa cuando te toca actuar o votar: título de la pestaña y, si la
+  /// pestaña está en segundo plano y has activado los avisos, notificación.
+  void _checkTurn(RoomDoc room) {
+    final myUid = ref.read(backendProvider).uid;
+    final members =
+        ref.read(membersProvider(widget.code)).valueOrNull ??
+        const <MemberDoc>[];
+    final me = ref.read(privateProvider(widget.code)).valueOrNull;
+    String? key;
+    String? body;
+    if (room.phase == Phase.night) {
+      final p = NightPrompt.compute(
+        room: room,
+        members: members,
+        me: me,
+        myUid: myUid,
+      );
+      if (p.isActor && p.myTurn) {
+        key = 'n${room.round}_${room.nightStep?.name}';
+        body = 'Es tu turno: ${RoleInfo.of(p.role!).name}.';
+      }
+    } else if (room.phase == Phase.voting) {
+      final m = findMember(members, myUid);
+      if (m != null && m.alive && !m.isNarrator) {
+        key = 'v${room.voteSeq}';
+        body = 'Es hora de votar.';
+      }
+    }
+    if (key == null) {
+      if (_turnKey != null) {
+        _turnKey = null;
+        setTabTitle(_baseTitle);
+      }
+      return;
+    }
+    if (key == _turnKey) return;
+    _turnKey = key;
+    setTabTitle('● ¡Tu turno! · El Asesino');
+    if (ref.read(settingsProvider).notifications && tabHidden) {
+      notifyTurn('El Asesino', body!);
     }
   }
 
@@ -123,6 +210,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
         backend: ref.read(backendProvider),
         roomId: widget.code,
         room: room,
+        timings: widget.tutorial?.timings ?? const HostTimings(),
       );
       h.onLost = () {
         if (mounted) setState(_stopHost);
@@ -137,10 +225,33 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
         h.tick().catchError((Object _) {});
       });
       setState(() => _hostError = null);
+      if (widget.tutorial != null) _autoStartTutorial(h);
     } catch (e) {
       if (mounted) setState(() => _hostError = friendlyError(e));
     } finally {
       _starting = false;
+    }
+  }
+
+  /// En el tutorial no hay lobby: cuando están todos los bots, empieza sola.
+  Future<void> _autoStartTutorial(HostCoordinator h) async {
+    if (_tutorialStarted) return;
+    _tutorialStarted = true;
+    final plan = widget.tutorial!;
+    for (var i = 0; i < 40; i++) {
+      if (!mounted) return;
+      final n = h.snapshot.members
+          .where((m) => !m.isNarrator && !m.left)
+          .length;
+      if (n >= plan.players) break;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+    try {
+      if (mounted && h.room.phase == Phase.lobby) {
+        await h.startGame(forcedRoles: plan.forcedRoles);
+      }
+    } catch (e) {
+      if (mounted) setState(() => _hostError = friendlyError(e));
     }
   }
 
@@ -177,10 +288,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
 
   Future<void> _leave() async {
     final room = ref.read(roomProvider(widget.code)).valueOrNull;
-    final body =
-        room == null ||
-            room.phase == Phase.finished ||
-            room.phase == Phase.lobby
+    final body = widget.onLocalExit != null
+        ? '¿Quieres terminar esta partida local?'
+        : room == null ||
+              room.phase == Phase.finished ||
+              room.phase == Phase.lobby
         ? '¿Quieres salir de la sala?'
         : 'Si sales, tu personaje quedará eliminado de la partida.';
     if (!await _confirm('Salir', body)) return;
@@ -223,7 +335,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
       }
     }
     _stopHost();
-    await ref.read(audioProvider).stopMusic();
+    setTabTitle(_baseTitle);
+    ref.read(audioProvider).setTrack(Track.menu); // vuelve la música del menú
     if (widget.onLocalExit != null) {
       widget.onLocalExit!();
     } else {
@@ -243,6 +356,49 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
     Phase.discussion || Phase.voting || Phase.voteResult => Scene.day,
     Phase.finished => r.winner == Winner.assassins ? Scene.night : Scene.dawn,
   };
+
+  /// Destello de los momentos clave (muertes, amanecer, expulsión, final).
+  (Object?, Color) _flashFor(RoomDoc r) {
+    final key = '${r.phase.name}_${r.version}';
+    switch (r.phase) {
+      case Phase.dawn:
+        return (
+          key,
+          (r.dawn?.deaths.isNotEmpty ?? false)
+              ? AppColors.danger
+              : AppColors.gold,
+        );
+      case Phase.voteResult:
+        return r.voteResult?.eliminated != null
+            ? (key, AppColors.danger)
+            : (null, AppColors.danger);
+      case Phase.finished:
+        return (
+          key,
+          r.winner == Winner.assassins ? AppColors.danger : AppColors.gold,
+        );
+      default:
+        return (null, AppColors.gold);
+    }
+  }
+
+  int _unread(List<ChatMessage> msgs, String myUid) {
+    final i = _chatSeenId == null
+        ? -1
+        : msgs.indexWhere((m) => m.id == _chatSeenId);
+    final after = i < 0 ? msgs : msgs.sublist(i + 1);
+    return after.where((m) => m.uid != myUid).length;
+  }
+
+  Future<void> _openChat() async {
+    await showChatSheet(context, widget.code);
+    final msgs = ref.read(chatProvider(widget.code)).valueOrNull;
+    if (mounted)
+      setState(
+        () =>
+            _chatSeenId = (msgs == null || msgs.isEmpty) ? null : msgs.last.id,
+      );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -317,6 +473,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
         !isHost && room.phase != Phase.finished && _watchdog.hostStale;
     final inGame = room.phase != Phase.lobby && room.phase != Phase.finished;
     final scene = _sceneFor(room);
+    final (flashKey, flashColor) = _flashFor(room);
+
+    final chatAsync = ref.watch(chatProvider(widget.code));
+    final msgs = chatAsync.valueOrNull ?? const <ChatMessage>[];
+    if (!_chatInit && chatAsync.hasValue) {
+      _chatInit = true; // lo anterior a mi entrada no cuenta como no leído
+      _chatSeenId = msgs.isEmpty ? null : msgs.last.id;
+    }
+    final unread = _chatInit ? _unread(msgs, myUid) : 0;
 
     return PopScope(
       canPop: false,
@@ -359,11 +524,25 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
                       ),
                     ),
                   ),
+                  if (widget.tutorial != null)
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 520),
+                        child: TutorialCoach(
+                          room: room,
+                          members: members,
+                          me: me,
+                          myUid: myUid,
+                          onSkip: () => _exitRoom(),
+                        ),
+                      ),
+                    ),
                   if (inGame && _host != null && isHost)
                     HostBar(host: _host!, myUid: myUid),
                 ],
               ),
             ),
+            FlashOverlay(trigger: flashKey, color: flashColor),
             if (widget.onLocalExit != null)
               SafeArea(
                 child: Align(
@@ -371,7 +550,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 14, 0, 0),
                     child: Text(
-                      'MODO BOTS · LOCAL',
+                      widget.tutorial != null
+                          ? 'TUTORIAL'
+                          : 'MODO BOTS · LOCAL',
                       style: AppText.label(10, color: AppColors.text2),
                     ),
                   ),
@@ -380,38 +561,57 @@ class _RoomScreenState extends ConsumerState<RoomScreen>
             SafeArea(
               child: Align(
                 alignment: Alignment.topRight,
-                child: PopupMenuButton<String>(
-                  tooltip: 'Menú',
-                  icon: const Icon(Icons.more_vert, color: AppColors.text2),
-                  color: AppColors.bg2,
-                  onSelected: (v) {
-                    switch (v) {
-                      case 'settings':
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const SettingsScreen(),
-                          ),
-                        );
-                      case 'leave':
-                        _leave();
-                      case 'close':
-                        _close();
-                    }
-                  },
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(
-                      value: 'settings',
-                      child: Text('Ajustes'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'leave',
-                      child: Text('Salir de la sala'),
-                    ),
-                    if (isHost)
-                      const PopupMenuItem(
-                        value: 'close',
-                        child: Text('Cerrar la sala'),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: unread > 0 ? 'Chat ($unread sin leer)' : 'Chat',
+                      onPressed: _openChat,
+                      icon: Badge(
+                        label: Text('$unread'),
+                        isLabelVisible: unread > 0,
+                        backgroundColor: AppColors.gold,
+                        textColor: AppColors.bg,
+                        child: const Icon(
+                          Icons.chat_bubble_outline,
+                          color: AppColors.text2,
+                        ),
                       ),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: 'Menú',
+                      icon: const Icon(Icons.more_vert, color: AppColors.text2),
+                      color: AppColors.bg2,
+                      onSelected: (v) {
+                        switch (v) {
+                          case 'settings':
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const SettingsScreen(),
+                              ),
+                            );
+                          case 'leave':
+                            _leave();
+                          case 'close':
+                            _close();
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
+                          value: 'settings',
+                          child: Text('Ajustes'),
+                        ),
+                        const PopupMenuItem(
+                          value: 'leave',
+                          child: Text('Salir de la sala'),
+                        ),
+                        if (isHost && widget.onLocalExit == null)
+                          const PopupMenuItem(
+                            value: 'close',
+                            child: Text('Cerrar la sala'),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),

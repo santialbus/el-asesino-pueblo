@@ -30,6 +30,14 @@ class BotPlayer {
   /// Probabilidad de pasar sin actuar de noche (10 %).
   bool passSometimes = true;
 
+  /// Jugadores a los que este bot nunca ataca ni vota (p. ej. en el tutorial,
+  /// para que la persona no sea eliminada antes de aprender).
+  Set<String> spare = {};
+
+  /// Si es true, escribe frases sueltas en el chat durante el debate.
+  bool chatty = true;
+  final Set<String> _chatted = {};
+
   String get uid => backend.uid;
 
   MemberDoc? get self {
@@ -40,7 +48,10 @@ class BotPlayer {
   }
 
   /// Olvida lo ya hecho (p. ej. al empezar otra partida).
-  void reset() => _done.clear();
+  void reset() {
+    _done.clear();
+    _chatted.clear();
+  }
 
   /// Si toca actuar o votar y aún no lo ha hecho, lo hace. Idempotente.
   Future<void> act() async {
@@ -54,18 +65,32 @@ class BotPlayer {
       final key = 'n${r.round}_${r.nightStep!.name}';
       if (p.myTurn && !_done.contains(key)) {
         _done.add(key);
-        final pool = [...p.validTargets]..shuffle(rng);
+        final pool = [for (final t in p.validTargets) if (!spare.contains(t)) t]..shuffle(rng);
         final pass = passSometimes && rng.nextInt(10) == 0;
         final picks = (pass || pool.length < p.picks) ? <String>[] : pool.take(p.picks).toList();
         await actions.submitNight(r, p.role!, picks);
+      }
+    } else if (r.phase == Phase.discussion) {
+      final key = 'c${r.round}';
+      if (chatty && !_chatted.contains(key)) {
+        _chatted.add(key);
+        if (rng.nextInt(100) < 55) {
+          final others = [for (final m in members) if (m.alive && m.uid != uid && !m.isNarrator) m.name];
+          final who = others.isEmpty ? 'alguien' : others[rng.nextInt(others.length)];
+          final line = kBotPhrases[rng.nextInt(kBotPhrases.length)].replaceAll('{n}', who);
+          await backend.sendChat(roomId, line);
+        }
       }
     } else if (r.phase == Phase.voting) {
       final key = 'v${r.voteSeq}';
       if (!_done.contains(key)) {
         _done.add(key);
         final cands = r.voteCandidates.isNotEmpty
-            ? r.voteCandidates.where((u) => u != uid).toList()
-            : [for (final m in members) if (m.alive && m.uid != uid && !m.isNarrator && !m.left) m.uid];
+            ? r.voteCandidates.where((u) => u != uid && !spare.contains(u)).toList()
+            : [
+                for (final m in members)
+                  if (m.alive && m.uid != uid && !m.isNarrator && !m.left && !spare.contains(m.uid)) m.uid
+              ];
         final abstain = r.config.allowAbstain && (cands.isEmpty || rng.nextInt(12) == 0);
         if (abstain) {
           await actions.submitVote(r, kAbstain);
@@ -147,4 +172,16 @@ const List<String> kBotNames = [
   'Marta', 'Luis', 'Carmen', 'Pablo', 'Lucía', 'Jorge',
   'Elena', 'Diego', 'Sofía', 'Álvaro', 'Irene', 'Hugo',
   'Nuria', 'Iván', 'Paula', 'Raúl', 'Clara', 'Óscar', 'Inés',
+];
+
+/// Frases de los bots en el chat ({n} = nombre de otro jugador).
+const List<String> kBotPhrases = [
+  'Yo no he sido, os lo juro.',
+  '¿No os parece que {n} está muy callado?',
+  'Yo sospecho de {n}.',
+  'Anoche no oí nada raro...',
+  '{n}, ¿tú dónde estabas?',
+  'Mejor no votemos a la ligera.',
+  'Yo confío en {n}.',
+  'Esto huele a asesino cerca de {n}.',
 ];

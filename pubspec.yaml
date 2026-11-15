@@ -18,13 +18,11 @@ dependencies:
   cloud_firestore: ">=5.5.0 <7.0.0"
   shared_preferences: ^2.3.3
   audioplayers: ^6.1.0
-  flutter_dotenv: ^5.2.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-  test: ^1.26.3
 
 flutter:
   uses-material-design: true

@@ -39,6 +39,14 @@ class SwitchableBackend implements GameBackend {
   Stream<RoomDoc?> watchRoom(String roomId) => _current.watchRoom(roomId);
 
   @override
+  Stream<List<ChatMessage>> watchChat(String roomId) =>
+      _current.watchChat(roomId);
+
+  @override
+  Future<void> sendChat(String roomId, String text) =>
+      _current.sendChat(roomId, text);
+
+  @override
   Stream<List<MemberDoc>> watchMembers(String roomId) =>
       _current.watchMembers(roomId);
 

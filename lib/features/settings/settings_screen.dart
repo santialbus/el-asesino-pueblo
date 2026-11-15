@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme.dart';
+import '../../core/platform/notifier.dart';
 import '../../core/services/settings.dart';
 import '../../shared/widgets/page.dart';
 
@@ -42,6 +43,37 @@ class SettingsScreen extends ConsumerWidget {
             value: s.haptics,
             onChanged: (v) => set(s.copyWith(haptics: v)),
           ),
+          if (notificationsSupported)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('Avisos de turno', style: AppText.body(16)),
+              subtitle: Text(
+                'Una notificación cuando te toca actuar o votar con esta pestaña en segundo plano '
+                '(además del aviso en el título de la pestaña). Sólo en el navegador.',
+                style: AppText.body(12, color: AppColors.text2),
+              ),
+              value: s.notifications,
+              onChanged: (v) async {
+                if (!v) {
+                  set(s.copyWith(notifications: false));
+                  return;
+                }
+                final res = await requestNotificationPermission();
+                if (res == 'granted') {
+                  set(s.copyWith(notifications: true));
+                } else if (context.mounted) {
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'El navegador no ha dado permiso para mostrar notificaciones.',
+                        ),
+                      ),
+                    );
+                }
+              },
+            ),
           const SizedBox(height: 12),
           Text('ACCESIBILIDAD', style: AppText.label(12)),
           SwitchListTile(

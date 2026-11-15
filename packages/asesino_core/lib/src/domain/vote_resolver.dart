@@ -104,6 +104,22 @@ class VoteResolver {
       }
     }
 
+    // Duelo sin salida: quedan 2 vivos y ninguno puede matar de noche (no queda
+    // ningún Asesino; p. ej. La Puta del bando asesino contra un civil con
+    // mayoría estricta). Cada uno sólo puede votar al otro => empate perpetuo.
+    // Para que la partida no dure eternamente, se resuelve al azar.
+    final alive = state.alive;
+    final deadlockedDuel =
+        alive.length == 2 && alive.every((p) => p.role != RoleId.assassin);
+    if (deadlockedDuel && eliminated == null) {
+      final pool = tied.length > 1
+          ? tied
+          : ([for (final p in alive) p.uid]..sort());
+      eliminated = pool[rng.nextInt(pool.length)];
+      tied = [];
+      needsRevote = false;
+    }
+
     var newState = state;
     var deaths = <Death>[];
     if (eliminated != null) {

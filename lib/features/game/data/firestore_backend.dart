@@ -15,12 +15,23 @@ import 'package:firebase_auth/firebase_auth.dart';
 /// rooms/{code}/hostState/state      copia para recuperación (anfitrión)
 /// rooms/{code}/actions/{round_uid}  acciones nocturnas (create-only)
 /// rooms/{code}/votes/{seq_uid}      votos (create-only)
+/// rooms/{code}/chat/{id}            mensajes de chat
 /// ```
+///
+/// Todos los documentos llevan `expireAt` (Timestamp) para la política TTL de
+/// Firestore, que borra las salas abandonadas (ver docs/TTL.md).
 class FirestoreBackend implements GameBackend {
   FirestoreBackend(this._db, this._auth);
 
   final FirebaseFirestore _db;
   final FirebaseAuth _auth;
+
+  /// Caducidad de la sala (se renueva en cada transición del anfitrión) y de
+  /// sus documentos auxiliares.
+  static const Duration _roomTtl = Duration(hours: 24);
+  static const Duration _subTtl = Duration(hours: 48);
+  static Timestamp _expire(Duration d) =>
+      Timestamp.fromDate(DateTime.now().add(d));
 
   @override
   String get uid {
@@ -85,10 +96,14 @@ class FirestoreBackend implements GameBackend {
       tx.set(ref, {
         ...room.toMap(),
         'hostHeartbeat': FieldValue.serverTimestamp(),
+        'expireAt': _expire(_roomTtl),
       });
     });
     // El miembro se crea aparte: las reglas exigen que la sala ya exista.
-    await _col(room.code, 'members').doc(host.uid).set(host.toMap());
+    await _col(
+      room.code,
+      'members',
+    ).doc(host.uid).set({...host.toMap(), 'expireAt': _expire(_subTtl)});
   });
 
   @override
@@ -100,7 +115,10 @@ class FirestoreBackend implements GameBackend {
     if (room.phase != Phase.lobby) {
       throw RoomNotJoinableException('La partida ya ha empezado.');
     }
-    await _col(roomId, 'members').doc(uid).set(me.toMap());
+    await _col(
+      roomId,
+      'members',
+    ).doc(uid).set({...me.toMap(), 'expireAt': _expire(_subTtl)});
   });
 
   @override
@@ -123,6 +141,44 @@ class FirestoreBackend implements GameBackend {
       return d == null ? null : _parseRoom(d);
     }),
   );
+
+  @override
+  Stream<List<ChatMessage>> watchChat(String roomId) => _guardStream(
+    _col(
+      roomId,
+      'chat',
+    ).orderBy('ts', descending: true).limit(60).snapshots().map((q) {
+      final list = [
+        for (final d in q.docs)
+          ChatMessage(
+            id: d.id,
+            uid: d.data()['uid'] as String? ?? '',
+            name: d.data()['name'] as String? ?? '?',
+            text: d.data()['text'] as String? ?? '',
+            // `ts` es null un instante mientras el servidor no lo ha fijado.
+            tsMs: d.data()['ts'] is Timestamp
+                ? (d.data()['ts'] as Timestamp).millisecondsSinceEpoch
+                : DateTime.now().millisecondsSinceEpoch,
+          ),
+      ];
+      return list.reversed.toList();
+    }),
+  );
+
+  @override
+  Future<void> sendChat(String roomId, String text) => _guard(() async {
+    final err = ChatMessage.validateText(text);
+    if (err != null) throw PermissionDeniedException(err);
+    final me = await _col(roomId, 'members').doc(uid).get();
+    final name = me.data()?['name'] as String? ?? '?';
+    await _col(roomId, 'chat').add({
+      'uid': uid,
+      'name': name,
+      'text': text.trim(),
+      'ts': FieldValue.serverTimestamp(),
+      'expireAt': _expire(_roomTtl),
+    });
+  });
 
   @override
   Stream<List<MemberDoc>> watchMembers(String roomId) => _guardStream(
@@ -192,11 +248,17 @@ class FirestoreBackend implements GameBackend {
       final newVersion = c.expectedVersion + 1;
       final map = c.room.toMap()
         ..['version'] = newVersion
-        ..['hostUid'] = cur['hostUid'];
+        ..['hostUid'] = cur['hostUid']
+        ..['expireAt'] = _expire(
+          _roomTtl,
+        ); // cada transición renueva la caducidad
       tx.update(roomRef, map);
 
       c.privates.forEach(
-        (u, p) => tx.set(_col(roomId, 'private').doc(u), p.toMap()),
+        (u, p) => tx.set(_col(roomId, 'private').doc(u), {
+          ...p.toMap(),
+          'expireAt': _expire(_subTtl),
+        }),
       );
       c.memberPatches.forEach(
         (u, patch) => tx.update(_col(roomId, 'members').doc(u), patch),
@@ -205,7 +267,10 @@ class FirestoreBackend implements GameBackend {
         tx.delete(_col(roomId, 'members').doc(u));
       }
       if (c.hostState != null) {
-        tx.set(_col(roomId, 'hostState').doc('state'), c.hostState!.toMap());
+        tx.set(_col(roomId, 'hostState').doc('state'), {
+          ...c.hostState!.toMap(),
+          'expireAt': _expire(_subTtl),
+        });
       }
       for (final id in c.deleteActions) {
         tx.delete(_col(roomId, 'actions').doc(id));
@@ -229,12 +294,18 @@ class FirestoreBackend implements GameBackend {
 
   @override
   Future<void> submitAction(String roomId, NightAction a) => _guard(() async {
-    await _col(roomId, 'actions').doc('${a.round}_${a.uid}').set(a.toMap());
+    await _col(roomId, 'actions').doc('${a.round}_${a.uid}').set({
+      ...a.toMap(),
+      'expireAt': _expire(_subTtl),
+    });
   });
 
   @override
   Future<void> submitVote(String roomId, VoteDoc v) => _guard(() async {
-    await _col(roomId, 'votes').doc(v.id).set(v.toMap());
+    await _col(
+      roomId,
+      'votes',
+    ).doc(v.id).set({...v.toMap(), 'expireAt': _expire(_subTtl)});
   });
 
   @override
@@ -243,6 +314,7 @@ class FirestoreBackend implements GameBackend {
         final batch = _db.batch();
         batch.set(_col(roomId, 'presence').doc(uid), {
           'ts': FieldValue.serverTimestamp(),
+          'expireAt': _expire(_subTtl),
         });
         if (asHost) {
           batch.update(_room(roomId), {
@@ -285,6 +357,7 @@ class FirestoreBackend implements GameBackend {
     for (final name in [
       'actions',
       'votes',
+      'chat',
       'private',
       'hostState',
       'presence',

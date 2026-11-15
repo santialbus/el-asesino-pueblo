@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/theme.dart';
+import '../../core/platform/link.dart';
 import '../../shared/widgets/controls.dart';
 import '../../shared/widgets/game_widgets.dart';
 import 'config_sheet.dart';
@@ -203,8 +204,9 @@ class _CodeCard extends StatelessWidget {
                 onPressed: () async {
                   await Clipboard.setData(
                     ClipboardData(
-                      text:
-                          'Únete a mi partida de El Asesino. Código de sala: $code',
+                      text: inviteLink(code) != null
+                          ? 'Únete a mi partida de El Asesino: ${inviteLink(code)}  (código: $code)'
+                          : 'Únete a mi partida de El Asesino. Código de sala: $code',
                     ),
                   );
                   if (context.mounted)

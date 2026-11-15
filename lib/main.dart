@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
+import 'core/platform/link.dart';
 import 'core/services/settings.dart';
 import 'features/game/application/providers.dart';
 import 'features/game/data/firestore_backend.dart';
@@ -34,7 +35,7 @@ Future<void> main() async {
           prefsProvider.overrideWithValue(prefs),
           backendProvider.overrideWithValue(backend),
         ],
-        child: const AsesinoApp(),
+        child: AsesinoApp(joinCode: roomCodeFromUri(Uri.base)),
       ),
     );
   } catch (e) {
